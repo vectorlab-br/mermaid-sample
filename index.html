@@ -35,15 +35,19 @@
 
       <nav class="tabs" role="tablist" aria-label="Modo de visualização">
         <span class="tab-indicator" id="tabIndicator"></span>
-        <button role="tab" data-mode="tree" class="tab active" title="Árvore (1)">
-          <svg viewBox="0 0 24 24"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="16" y="3" width="6" height="5" rx="1.5"/><rect x="16" y="16" width="6" height="5" rx="1.5"/><path d="M8 12h4M12 5.5v13M12 5.5h4M12 18.5h4"/></svg>
-          <span>Árvore</span>
+        <button role="tab" data-mode="vertical" class="tab active" title="Vertical (1)">
+          <svg viewBox="0 0 24 24"><rect x="8.5" y="2" width="7" height="5" rx="1.5"/><rect x="2" y="16" width="6" height="5" rx="1.5"/><rect x="9" y="16" width="6" height="5" rx="1.5"/><rect x="16" y="16" width="6" height="5" rx="1.5"/><path d="M12 7v4.5M5 16v-4.5h14V16M12 11.5V16"/></svg>
+          <span>Vertical</span>
         </button>
-        <button role="tab" data-mode="radial" class="tab" title="Radial (2)">
+        <button role="tab" data-mode="tree" class="tab" title="Árvore horizontal (2)">
+          <svg viewBox="0 0 24 24"><rect x="2" y="9" width="6" height="6" rx="1.5"/><rect x="16" y="3" width="6" height="5" rx="1.5"/><rect x="16" y="16" width="6" height="5" rx="1.5"/><path d="M8 12h4M12 5.5v13M12 5.5h4M12 18.5h4"/></svg>
+          <span>Horizontal</span>
+        </button>
+        <button role="tab" data-mode="radial" class="tab" title="Radial (3)">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="12" r="6.5" stroke-dasharray="2 2.5"/><circle cx="12" cy="12" r="10.5" stroke-dasharray="2 2.5"/></svg>
           <span>Radial</span>
         </button>
-        <button role="tab" data-mode="mermaid" class="tab" title="Mermaid original (3)">
+        <button role="tab" data-mode="mermaid" class="tab" title="Mermaid original (4)">
           <svg viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/></svg>
           <span>Mermaid</span>
         </button>
@@ -95,7 +99,7 @@
         <span><kbd>F</kbd> ajustar</span>
         <span><kbd>E</kbd> expandir</span>
         <span><kbd>C</kbd> recolher</span>
-        <span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> modos</span>
+        <span><kbd>1</kbd>–<kbd>4</kbd> modos</span>
       </footer>
     </aside>
     <div class="scrim" id="scrim"></div>

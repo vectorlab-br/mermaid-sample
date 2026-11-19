@@ -8,6 +8,15 @@
   const NODE_H = 40;
   const GAP_Y = 12;
   const GAP_X = 84;
+  // vertical (top-down) org chart
+  const VW = 196;
+  const VH = 54;
+  const V_GAP_X = 26;
+  const V_GAP_Y = 58;
+  const STACK_INDENT = 22;
+  const STACK_TOP = 22;
+  const STACK_GAP = 10;
+  const MODES = ['vertical', 'tree', 'radial', 'mermaid'];
   const FONT = 'Manrope, system-ui, -apple-system, "Segoe UI", sans-serif';
   const DUR = 600;
   const INITIAL_DEPTH = 2;
@@ -69,7 +78,7 @@
   const gNodes = gView.select('g.nodes');
 
   const state = {
-    mode: ['tree', 'radial', 'mermaid'].includes(store.get('org.mode')) ? store.get('org.mode') : 'tree',
+    mode: MODES.includes(store.get('org.view')) ? store.get('org.view') : 'vertical',
     source: window.ORG_SOURCE,
     model: null,
     root: null,
@@ -204,9 +213,67 @@
   }
 
   // ---------------------------------------------------------------- layout
+  // Top-down layout: branch children side by side; leaf children stacked in an
+  // indented column (classic org chart look, keeps the chart from getting too wide).
+  function layoutVertical(root) {
+    const measure = (d) => {
+      const kids = d.children || [];
+      kids.forEach(measure);
+      const leaves = kids.filter((k) => !k.kids);
+      const branches = kids.filter((k) => k.kids);
+      d.stackKids = branches.length === 0 && leaves.length === 1 ? [] : leaves;
+      d.rowKids = kids.filter((k) => !d.stackKids.includes(k));
+      const stackW = d.stackKids.length ? STACK_INDENT + VW : 0;
+      if (!kids.length) d.sw = VW;
+      else if (!d.rowKids.length) d.sw = stackW;
+      else {
+        const slots = [...(stackW ? [stackW] : []), ...d.rowKids.map((k) => k.sw)];
+        d.sw = Math.max(VW, d3.sum(slots) + V_GAP_X * (slots.length - 1));
+      }
+    };
+    const place = (d, left, top) => {
+      const kids = d.children || [];
+      d.cur = { x: left + d.sw / 2, y: top + VH / 2, a: 0, r: 0 };
+      kids.forEach((k) => { k.stacked = false; });
+      if (!kids.length) return;
+      if (!d.rowKids.length) {
+        // pure stack hanging under the parent
+        d.cur.x = left + VW / 2;
+        d.stackKids.forEach((k, i) => {
+          k.stacked = true;
+          k.spine = left + STACK_INDENT / 2;
+          k.pure = true;
+          k.cur = { x: left + STACK_INDENT + VW / 2, y: top + VH + STACK_TOP + VH / 2 + i * (VH + STACK_GAP), a: 0, r: 0 };
+        });
+        return;
+      }
+      const rowTop = top + VH + V_GAP_Y;
+      const stackW = d.stackKids.length ? STACK_INDENT + VW : 0;
+      const contentW = (stackW ? stackW + V_GAP_X : 0) + d3.sum(d.rowKids, (k) => k.sw) + V_GAP_X * (d.rowKids.length - 1);
+      let x = left + (d.sw - contentW) / 2;
+      if (stackW) {
+        d.stackKids.forEach((k, i) => {
+          k.stacked = true;
+          k.spine = x + STACK_INDENT / 2;
+          k.pure = false;
+          k.cur = { x: x + STACK_INDENT + VW / 2, y: rowTop + VH / 2 + i * (VH + STACK_GAP), a: 0, r: 0 };
+        });
+        x += stackW + V_GAP_X;
+      }
+      d.rowKids.forEach((k) => { place(k, x, rowTop); x += k.sw + V_GAP_X; });
+    };
+    measure(root);
+    root.stacked = false;
+    place(root, -root.sw / 2, 0);
+    const dx = root.cur.x;
+    root.each((d) => { if (d.cur) { d.cur.x -= dx; if (d.stacked) d.spine -= dx; } });
+  }
+
   function layout() {
     const root = state.root;
-    if (state.mode === 'tree') {
+    if (state.mode === 'vertical') {
+      layoutVertical(root);
+    } else if (state.mode === 'tree') {
       d3.tree()
         .nodeSize([NODE_H + GAP_Y, NODE_W + GAP_X])
         .separation((a, b) => (a.parent === b.parent ? 1 : 1.35))(root);
@@ -227,6 +294,22 @@
   }
 
   const isTree = () => state.mode === 'tree';
+  const isVertical = () => state.mode === 'vertical';
+  const isCard = () => state.mode === 'tree' || state.mode === 'vertical';
+  const cardW = () => (isVertical() ? VW : NODE_W);
+  const cardH = () => (isVertical() ? VH : NODE_H);
+  // orthogonal connector; always 5 commands so transitions interpolate cleanly
+  function vLink(s, t, d) {
+    const sy = s.y + VH / 2;
+    if (d && d.stacked) {
+      const my = d.pure ? sy : sy + V_GAP_Y / 2;
+      const sx = d.pure ? d.spine : s.x;
+      return `M${sx},${sy}V${my}H${d.spine}V${t.y}H${t.x - VW / 2}`;
+    }
+    const ty = t.y - VH / 2;
+    const my = sy + (ty - sy) / 2;
+    return `M${s.x},${sy}V${my}H${t.x}V${ty}H${t.x}`;
+  }
   const curve = (x0, y0, x1, y1) => {
     const mx = (x0 + x1) / 2;
     return `M${x0},${y0}C${mx},${y0} ${mx},${y1} ${x1},${y1}`;
@@ -237,14 +320,35 @@
     const [x0, y0] = polar(s.a, s.r), [x1, y1] = polar(s.a, mr), [x2, y2] = polar(t.a, mr), [x3, y3] = polar(t.a, t.r);
     return `M${x0},${y0}C${x1},${y1} ${x2},${y2} ${x3},${y3}`;
   }
-  function linkD(s, t) {
+  function linkD(s, t, d) {
+    if (isVertical()) return vLink(s, t, d);
     return isTree() ? curve(s.x + NODE_W / 2, s.y, t.x - NODE_W / 2, t.y) : radialCurve(s, t);
   }
   function linkCollapsed(p) {
+    if (isVertical()) { const y = p.y + VH / 2 + 12; return `M${p.x},${y}V${y}H${p.x}V${y}H${p.x}`; }
     if (isTree()) { const x = p.x + NODE_W / 2 + 12; return curve(x, p.y, x, p.y); }
     return radialCurve(p, p);
   }
-  const nodePoint = (p) => ({ x: p.x + (isTree() ? NODE_W / 2 + 12 : 0), y: p.y });
+  const nodePoint = (p) => {
+    if (isVertical()) return { x: p.x, y: p.y + VH / 2 + 12 };
+    return { x: p.x + (isTree() ? NODE_W / 2 + 12 : 0), y: p.y };
+  };
+  function wrapLines(text, maxW, font, maxLines = 2) {
+    measureCtx.font = font;
+    if (measureCtx.measureText(text).width <= maxW) return [text];
+    const words = text.split(/\s+/);
+    const lines = [];
+    let line = '';
+    for (let i = 0; i < words.length; i++) {
+      const tryLine = line ? `${line} ${words[i]}` : words[i];
+      if (measureCtx.measureText(tryLine).width <= maxW || !line) { line = tryLine; continue; }
+      lines.push(line);
+      if (lines.length === maxLines - 1) { line = words.slice(i).join(' '); break; }
+      line = words[i];
+    }
+    lines.push(line);
+    return lines.map((l, i) => (i === lines.length - 1 ? fitText(l, maxW, font) : l));
+  }
 
   // ---------------------------------------------------------------- render
   function update(source, opts = {}) {
@@ -265,7 +369,7 @@
       .attr('opacity', 0)
       .merge(link)
       .transition(t)
-      .attr('d', (d) => linkD(d.source.cur, d.target.cur))
+      .attr('d', (d) => linkD(d.source.cur, d.target.cur, d.target))
       .attr('opacity', 1);
 
     // nodes
@@ -297,7 +401,37 @@
     const s = styleOf(d.data.cls);
     const label = d.data.label;
     g.append('title').text(label);
-    if (isTree()) {
+    if (isVertical()) {
+      g.append('rect')
+        .attr('class', 'card')
+        .attr('x', -VW / 2).attr('y', -VH / 2)
+        .attr('width', VW).attr('height', VH)
+        .attr('rx', 10)
+        .attr('fill', s.fill).attr('stroke', s.stroke).attr('stroke-width', s.sw)
+        .attr('filter', 'url(#shadow)');
+      const strong = isStrong(d);
+      const size = strong ? 11.5 : 12;
+      const font = `${strong ? 800 : 600} ${size}px Manrope`;
+      const lines = wrapLines(label, VW - 24, font);
+      const text = g.append('text')
+        .attr('class', 'label')
+        .attr('text-anchor', 'middle')
+        .attr('fill', s.color)
+        .attr('font-family', FONT)
+        .attr('font-size', size)
+        .attr('font-weight', strong ? 800 : 600)
+        .attr('letter-spacing', strong ? '0.03em' : null);
+      lines.forEach((l, i) => {
+        text.append('tspan').attr('x', 0)
+          .attr('y', (i - (lines.length - 1) / 2) * (size + 3) - (d.kids ? 3 : 0))
+          .attr('dy', '0.35em').text(l);
+      });
+      if (d.kids) {
+        const tg = g.append('g').attr('class', 'toggle').attr('transform', `translate(0,${VH / 2})`);
+        tg.append('circle').attr('r', 11).attr('fill', s.stroke);
+        tg.append('text').attr('text-anchor', 'middle').attr('dy', '0.36em').attr('font-family', FONT);
+      }
+    } else if (isTree()) {
       g.append('rect')
         .attr('class', 'card')
         .attr('x', -NODE_W / 2).attr('y', -NODE_H / 2)
@@ -342,7 +476,7 @@
   function refreshNode(g, d, t) {
     const collapsed = !!(d.kids && !d.children);
     g.classed('collapsed', collapsed);
-    if (isTree()) {
+    if (isCard()) {
       g.select('.toggle text').text(collapsed ? `+${d.kids.length}` : '−');
       return;
     }
@@ -417,7 +551,7 @@
       x0 = Math.min(x0, d.cur.x); x1 = Math.max(x1, d.cur.x);
       y0 = Math.min(y0, d.cur.y); y1 = Math.max(y1, d.cur.y);
     });
-    if (isTree()) { x0 -= NODE_W / 2; x1 += NODE_W / 2 + 14; y0 -= NODE_H / 2; y1 += NODE_H / 2; }
+    if (isCard()) { x0 -= cardW() / 2; x1 += cardW() / 2 + 14; y0 -= cardH() / 2; y1 += cardH() / 2 + 14; }
     else { const p = 180; x0 -= p; x1 += p; y0 -= p; y1 += p; }
     const pad = 30;
     return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 };
@@ -451,8 +585,8 @@
   function pulse(d) {
     const g = gNodes.selectAll('g.node').filter((x) => x === d);
     if (g.empty()) return;
-    const shape = isTree()
-      ? g.append('rect').attr('x', -NODE_W / 2).attr('y', -NODE_H / 2).attr('width', NODE_W).attr('height', NODE_H).attr('rx', 10)
+    const shape = isCard()
+      ? g.append('rect').attr('x', -cardW() / 2).attr('y', -cardH() / 2).attr('width', cardW()).attr('height', cardH()).attr('rx', 10)
       : g.append('circle').attr('r', d.depth === 0 ? 14 : d.kids ? 8 : 5);
     shape.attr('class', 'pulse');
     setTimeout(() => shape.remove(), 2300);
@@ -550,7 +684,7 @@
   function fitBranch(d) {
     const nodes = d.descendants();
     const xs = nodes.map((n) => n.cur.x), ys = nodes.map((n) => n.cur.y);
-    const pad = isTree() ? NODE_W / 2 + 40 : 180;
+    const pad = isCard() ? cardW() / 2 + 40 : 180;
     const b = { x: Math.min(...xs) - pad, y: Math.min(...ys) - 60, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + 120 };
     const { w, h } = viewport();
     const k = Math.min(w / b.w, h / b.h, 1.1);
@@ -719,7 +853,7 @@
   // ---------------------------------------------------------------- modes
   function setMode(mode) {
     state.mode = mode;
-    store.set('org.mode', mode);
+    store.set('org.view', mode);
     document.querySelectorAll('.tab').forEach((b) => {
       const on = b.dataset.mode === mode;
       b.classList.toggle('active', on);
@@ -867,9 +1001,10 @@
     else if (k === 'f') fit();
     else if (k === 'e' && state.mode !== 'mermaid') $('#expandBtn').click();
     else if (k === 'c' && state.mode !== 'mermaid') $('#collapseBtn').click();
-    else if (k === '1') setMode('tree');
-    else if (k === '2') setMode('radial');
-    else if (k === '3') setMode('mermaid');
+    else if (k === '1') setMode('vertical');
+    else if (k === '2') setMode('tree');
+    else if (k === '3') setMode('radial');
+    else if (k === '4') setMode('mermaid');
     else if (k === '+' || k === '=') zoomBy(1.3);
     else if (k === '-') zoomBy(1 / 1.3);
     else if (e.key === 'Escape') { select(null); toggleSidebar(false); }
